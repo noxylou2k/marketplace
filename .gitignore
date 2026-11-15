@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local marketplace data used when Supabase is not configured
+/data
+/public/uploads
