@@ -15,7 +15,7 @@ export function getSampleListings(): Listing[] {
   const minutesAgo = (minutes: number) =>
     new Date(now - minutes * 60 * 1000).toISOString()
 
-  const featured: Listing[] = [
+  const featured: Omit<Listing, "status">[] = [
     {
       id: "car-mustang",
       title: "Ford Mustang",
@@ -114,7 +114,7 @@ export function getSampleListings(): Listing[] {
     },
   ]
 
-  const fillers: Listing[] = others.map((category, index) => ({
+  const fillers: Omit<Listing, "status">[] = others.map((category, index) => ({
     id: `sample-${index + 1}`,
     title: "Lorem ipsum dolor sit",
     description: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
@@ -127,5 +127,5 @@ export function getSampleListings(): Listing[] {
     created_at: minutesAgo(90 + index),
   }))
 
-  return [...featured, ...fillers]
+  return [...featured, ...fillers].map((listing) => ({ ...listing, status: "available" as const }))
 }

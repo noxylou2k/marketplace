@@ -31,6 +31,7 @@ function mapListing(row: Record<string, unknown>): Listing {
     seller_name: String(row.seller_name ?? ""),
     seller_email: String(row.seller_email ?? ""),
     image_url: row.image_url ? String(row.image_url) : null,
+    status: row.status === "sold" ? "sold" : "available",
     created_at: String(row.created_at ?? new Date().toISOString()),
   }
 }
@@ -78,7 +79,10 @@ async function loadAll(): Promise<Listing[]> {
   }
 
   const local = await readLocal()
-  return [...local.listings, ...getSampleListings()]
+  return [...local.listings, ...getSampleListings()].map((listing) => ({
+    ...listing,
+    status: listing.status === "sold" ? "sold" : "available",
+  }))
 }
 
 export async function getListings(filters: { category?: string; query?: string } = {}) {
@@ -167,6 +171,7 @@ export async function createListingRecord(input: {
     seller_name: input.sellerName,
     seller_email: input.sellerEmail,
     image_url: imageUrl,
+    status: "available",
     created_at: new Date().toISOString(),
   }
 

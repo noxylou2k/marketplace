@@ -1,9 +1,20 @@
 "use server"
 
+import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import { isCategorySlug } from "@/lib/categories"
 import { createListingRecord, createMessageRecord, getListing } from "@/lib/listings"
+import {
+  createConnectedAccount,
+  createOnboardingLink,
+  getSellerByEmail,
+  platformFeeCents,
+  priceToCents,
+  recordPendingOrder,
+  saveSeller,
+} from "@/lib/payments"
+import { appOrigin, getStripe } from "@/lib/stripe"
 import type { FormState } from "@/lib/types"
 
 const maxPhotoBytes = 5 * 1024 * 1024
@@ -23,7 +34,7 @@ export async function createListing(
   const category = text(formData, "category")
   const location = text(formData, "location") || "Palo Alto, CA"
   const sellerName = text(formData, "sellerName")
-  const sellerEmail = text(formData, "sellerEmail")
+  const sellerEmail = text(formData, "sellerEmail").toLowerCase()
   const price = Number(text(formData, "price"))
   const photo = formData.get("photo")
 
@@ -91,4 +102,113 @@ export async function sendMessage(
       sendError instanceof Error ? sendError.message : "Could not send message."
     return { error: messageText }
   }
+}
+
+export async function connectStripe(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const email = text(formData, "email").toLowerCase()
+  if (!emailPattern.test(email)) return { error: "Enter the email on your listings." }
+
+  let url: string
+  try {
+    const origin = appOrigin(await headers())
+    const existing = await getSellerByEmail(email)
+    let accountId = existing?.stripe_account_id ?? null
+
+    if (!accountId) {
+      const account = await createConnectedAccount(email)
+      accountId = account.id
+      const ready =
+        account.configuration?.merchant?.capabilities?.card_payments?.status === "active"
+      await saveSeller({
+        email,
+        stripeAccountId: account.id,
+        chargesEnabled: ready,
+        detailsSubmitted: ready,
+      })
+    }
+
+    url = await createOnboardingLink(accountId, origin)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not start Stripe onboarding."
+    if (message.includes("sellers") || message.includes("schema cache")) {
+      return {
+        error: "Payments tables are not in Supabase yet. Run supabase-schema.sql in the SQL editor, then try again.",
+      }
+    }
+    return { error: message }
+  }
+
+  redirect(url)
+}
+
+export async function buyListing(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const listingId = text(formData, "listingId")
+  const { listing, error } = await getListing(listingId)
+  if (error) return { error }
+  if (!listing) return { error: "This listing is no longer available." }
+  if (listing.status === "sold") return { error: "This listing has already sold." }
+
+  const amountCents = priceToCents(listing.price)
+  if (amountCents < 50) return { error: "Stripe checkout needs a price of at least $0.50." }
+
+  let checkoutUrl: string
+  try {
+    const seller = await getSellerByEmail(listing.seller_email)
+    if (!seller?.stripe_account_id || !seller.charges_enabled) {
+      return { error: "This seller is not ready to take payments yet." }
+    }
+
+    const stripe = getStripe()
+    const origin = appOrigin(await headers())
+    const feeCents = platformFeeCents(amountCents)
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: "usd",
+              unit_amount: amountCents,
+              product_data: { name: listing.title },
+            },
+          },
+        ],
+        payment_intent_data: {
+          application_fee_amount: feeCents,
+        },
+        success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&account=${seller.stripe_account_id}`,
+        cancel_url: `${origin}/item/${listing.id}`,
+        metadata: {
+          listing_id: listing.id,
+          seller_email: listing.seller_email,
+          stripe_account_id: seller.stripe_account_id,
+          fee_cents: String(feeCents),
+        },
+      },
+      { stripeAccount: seller.stripe_account_id },
+    )
+
+    if (!session.url) return { error: "Stripe did not return a checkout link." }
+    await recordPendingOrder({
+      listingId: listing.id,
+      sellerEmail: listing.seller_email,
+      stripeAccountId: seller.stripe_account_id,
+      stripeSessionId: session.id,
+      amountCents,
+      feeCents,
+    })
+    checkoutUrl = session.url
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not start checkout."
+    return { error: message }
+  }
+
+  redirect(checkoutUrl)
 }

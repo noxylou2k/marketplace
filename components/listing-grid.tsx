@@ -13,7 +13,14 @@ export function ListingGrid({ listings }: { listings: Listing[] }) {
             alt={listing.title}
             className="aspect-square w-full transition group-hover:brightness-95"
           />
-          <p className="mt-2 text-lg font-bold leading-tight">{formatPrice(listing.price)}</p>
+          <p className="mt-2 text-lg font-bold leading-tight">
+            {formatPrice(listing.price)}
+            {listing.status === "sold" ? (
+              <span className="ml-2 align-middle text-xs font-semibold uppercase tracking-wide text-muted">
+                Sold
+              </span>
+            ) : null}
+          </p>
           <p className="mt-1 line-clamp-2 text-sm leading-5">{listing.title}</p>
           <p className="mt-1 text-xs text-muted">{listing.location}</p>
         </Link>

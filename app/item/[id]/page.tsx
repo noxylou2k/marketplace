@@ -5,10 +5,12 @@ import { BackButton } from "@/components/back-button"
 import { Brand } from "@/components/brand"
 import { Frame } from "@/components/frame"
 import { ListingPhoto } from "@/components/listing-photo"
+import { BuyButton } from "@/components/buy-button"
 import { MessageForm } from "@/components/message-form"
 import { formatPrice, listedAgo } from "@/lib/format"
 import { categoryBySlug } from "@/lib/categories"
 import { getListing } from "@/lib/listings"
+import { getSellerByEmail } from "@/lib/payments"
 
 export function generateStaticParams() {
   return [{ id: "bike-24" }]
@@ -24,6 +26,15 @@ async function ItemDetails({ params }: { params: Promise<{ id: string }> }) {
 
   const category = categoryBySlug(listing.category)
   const seller = listing.seller_name || listing.seller_email
+  let sellerAccount = null
+  try {
+    sellerAccount = await getSellerByEmail(listing.seller_email)
+  } catch {
+    sellerAccount = null
+  }
+  const canBuy =
+    listing.status !== "sold" &&
+    Boolean(sellerAccount?.stripe_account_id && sellerAccount.charges_enabled)
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(240px,0.75fr)]">
@@ -36,7 +47,21 @@ async function ItemDetails({ params }: { params: Promise<{ id: string }> }) {
       />
       <div>
         <h1 className="text-2xl font-extrabold tracking-tight">{listing.title}</h1>
-        <p className="text-2xl font-extrabold">{formatPrice(listing.price)}</p>
+        <p className="text-2xl font-extrabold">
+          {formatPrice(listing.price)}
+          {listing.status === "sold" ? (
+            <span className="ml-2 align-middle text-sm font-semibold uppercase tracking-wide text-muted">
+              Sold
+            </span>
+          ) : null}
+        </p>
+        {listing.status === "sold" ? null : canBuy ? (
+          <BuyButton listingId={listing.id} price={listing.price} />
+        ) : (
+          <p className="mt-6 text-sm text-muted">
+            This seller has not connected Stripe yet, so the listing is not for sale.
+          </p>
+        )}
         <p className="mt-4 text-sm leading-6 text-neutral-800">
           {listedAgo(listing.created_at)}
           <br />
